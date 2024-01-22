@@ -14,7 +14,6 @@ variables:
 
 test:
     stage: test
-    runs-on: self-hosted
     script:
         - cd ${CI_PROJECT_DIR}
         - ./assignment-autotest/docker/docker-run-test.sh
