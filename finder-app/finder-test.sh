@@ -48,9 +48,7 @@ then
 		exit 1
 	fi
 fi
-echo "Removing the old writer utility and compiling as a native application"
-make clean
-make
+echo "Removing make commands. Will add cross compiler in part 2."
 
 for i in $( seq 1 $NUMFILES)
 do
