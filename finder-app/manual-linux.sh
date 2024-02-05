@@ -12,9 +12,9 @@ BUSYBOX_VERSION=1_33_1
 FINDER_APP_DIR=$(realpath $(dirname $0))
 ARCH=arm64
 CROSS_COMPILE=aarch64-none-linux-gnu-
-CC_PATH=/home/parth/gcc-arm-10.2-2020.11-x86_64-aarch64-none-linux-gnu/
-FINDER_PATH=/home/parth/CourseMaterial/AESD/assignment-3-and-later-parthkharade
-
+#FINDER_PATH=$(pwd)
+FINDER_PATH=$(realpath $(dirname $0))
+echo ${FINDER_PATH}
 if [ $# -lt 1 ]
 then
 	echo "Using default directory ${OUTDIR} for output"
@@ -108,7 +108,7 @@ sudo mknod -m 666 dev/null c 1 3
 sudo mknod -m 600 dev/comsole c 5 1
 
 # TODO: Clean and build the writer utility
-cd ${FINDER_PATH}/finder-app
+cd ${FINDER_PATH}
 make clean
 make CROSS_COMPILE=${CROSS_COMPILE}
 
@@ -117,8 +117,8 @@ make CROSS_COMPILE=${CROSS_COMPILE}
 
 mkdir -p "${OUTDIR}/rootfs/home/finder-app"
 mkdir -p "${OUTDIR}/rootfs/home/conf"
-cp -r ${FINDER_PATH}/finder-app/* ${OUTDIR}/rootfs/home/finder-app
-cp -r ${FINDER_PATH}/conf/* ${OUTDIR}/rootfs/home/conf
+cp -r ${FINDER_PATH}/* ${OUTDIR}/rootfs/home/finder-app
+cp -r ${FINDER_PATH}/../conf/* ${OUTDIR}/rootfs/home/conf
 
 
 cd "${OUTDIR}/rootfs"
