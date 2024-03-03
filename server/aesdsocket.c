@@ -18,8 +18,9 @@
 bool accept_connection = true;
 extern int errno;
 #define BACKLOG 20
-#define BUFF_SIZE 512
+#define BUFF_SIZE 1024
 const char *log_path = "/var/tmp/aesdsocketdata";
+const char *tmpfile_path = "/tmp/tmp1234";
 int caught_signal;
 int sockfd;
 void signal_handler(int sig_num)
@@ -152,9 +153,10 @@ int main(int argc, char *argv[])
             syslog(LOG_USER, "Accepted conncetion from : %s\n", peer_ip);
             
             int log_fd = open(log_path, O_CREAT | O_APPEND | O_RDWR, S_IRWXU | S_IRGRP | S_IROTH);
+            int tmp_fd = open(tmpfile_path, O_CREAT | O_RDWR, S_IRWXU | S_IRGRP | S_IROTH);
             int num_read_bytes = 0;
             int num_write_bytes = 0;
-            
+            int packet_len= 0;
             if (log_fd == -1)
             {
                 syslog(LOG_ERR, "open() error for log file : %s\n", strerror(errno));
@@ -173,19 +175,33 @@ int main(int argc, char *argv[])
                         close(cfd);
                         break;
                     }
-                    else if (num_read_bytes == 0 || (strchr(rec_buff, '\n') != NULL))
+                    else{
+                        packet_len+=num_read_bytes;
+                        num_write_bytes = write(tmp_fd, rec_buff, num_read_bytes);
+                        if (num_write_bytes != num_read_bytes)
+                        {
+                            syslog(LOG_ERR, "write() to tmp failed error : %s\n", strerror(errno));
+                            close(cfd);
+                            break;
+                        }
+                    }
+                    if (num_read_bytes == 0 || (strchr(rec_buff, '\n') != NULL))
                     {
                         packet_complete = true;
-                    }
-                    num_write_bytes = write(log_fd, rec_buff, num_read_bytes);
-                    if (num_write_bytes != num_read_bytes)
-                    {
-                        syslog(LOG_ERR, "write() failed error : %s\n", strerror(errno));
-                        close(cfd);
-                        break;
+                        char *tmp_buff=(char *)malloc(sizeof(char)*packet_len);
+                        lseek(tmp_fd, 0, SEEK_SET); // Reset the cursor to the origin before reading.
+                        read(tmp_fd,tmp_buff,packet_len);
+                        num_write_bytes = write(log_fd, tmp_buff, packet_len);
+                        if (num_write_bytes != packet_len)
+                        {
+                            syslog(LOG_ERR, "write() to aesdsock failed error : %s\n", strerror(errno));
+                            close(cfd);
+                            break;
+                        }
+                        free(tmp_buff);
+                        remove(tmpfile_path);
                     }
                 }
-                // reinitialize bool before starting send()
                 packet_complete = false;
                 lseek(log_fd, 0, SEEK_SET); // Reset the cursor to the origin before reading.
                 while (!packet_complete)
