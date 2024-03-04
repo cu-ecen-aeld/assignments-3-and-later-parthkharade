@@ -63,18 +63,31 @@ void init_timer()
 	timer_val.it_interval.tv_usec = 0;
 	setitimer(ITIMER_REAL, &timer_val, NULL);
 }
+void timer_thread()
+{
+	while (!signal_rec)
+	{
+		if (timer_expired)
+		{
+			time_t t = time(NULL);
+			struct tm *curr_time = localtime(&t);
+			char RFC2822BUF[50] = {0};
+			strftime(RFC2822BUF, sizeof(RFC2822BUF), "timestamp:%a, %d %b %Y %T %Z\n", curr_time);
+			int timeStrLen = strlen(RFC2822BUF);
+			fflush(stdout);
+			pthread_mutex_lock(&aesdsock_mutex);
+			int log_fd = open(log_path, O_CREAT | O_APPEND | O_RDWR, S_IRWXU | S_IRGRP | S_IROTH);
+			write(log_fd, RFC2822BUF, timeStrLen);
+			pthread_mutex_unlock(&aesdsock_mutex);
+			close(log_fd);
+			timer_expired = false;
+		}
+	}
+	return;
+}
 void timer_handler()
 {
-	time_t t = time(NULL);
-	struct tm *curr_time = localtime(&t);
-	char RFC2822BUF[50]={0};
-	strftime(RFC2822BUF, sizeof(RFC2822BUF), "timestamp:%a, %d %b %Y %T %Z\n", curr_time);
-	int timeStrLen = strlen(RFC2822BUF);
-	fflush(stdout);
-	pthread_mutex_lock(&aesdsock_mutex);
-	int log_fd = open(log_path, O_CREAT | O_APPEND | O_RDWR, S_IRWXU | S_IRGRP | S_IROTH);
-	write(log_fd, RFC2822BUF, timeStrLen);
-	pthread_mutex_unlock(&aesdsock_mutex);
+	timer_expired = true;
 }
 int handle_new_connection(void *__thread_data)
 {
@@ -302,6 +315,8 @@ int main(int argc, char *argv[])
 		}
 	}
 	init_timer();
+	pthread_t timer_thread_id;
+	status = pthread_create(&timer_thread_id,NULL,(void *)timer_thread,NULL);
 	status = listen(sockfd, BACKLOG);
 	if (status != 0)
 	{
@@ -343,21 +358,6 @@ int main(int argc, char *argv[])
 			thread_data->id = thread_id;
 			SLIST_INSERT_HEAD(&head, thread_data, next);
 		}
-		if (timer_expired)
-		{
-			// https://stackoverflow.com/questions/1442116/how-to-get-the-date-and-time-values-in-a-c-program
-			//  time_t t = time(NULL);
-			//  struct tm *curr_time = localtime(&t);
-			//  char RFC2822BUF[40];
-			//  strftime(RFC2822BUF,sizeof(RFC2822BUF),"timestamp:%a, %d %b %Y %T %Z\n",curr_time);
-			//  int timeStrLen = strlen(RFC2822BUF);
-			//  pthread_mutex_lock(&aesdsock_mutex);
-			//  int log_fd = open(log_path, O_CREAT | O_APPEND | O_RDWR, S_IRWXU | S_IRGRP | S_IROTH);
-			//  write(log_fd,RFC2822BUF,timeStrLen);
-			//  pthread_mutex_unlock(&aesdsock_mutex);
-			// log time
-			timer_expired = false;
-		}
 		SLIST_FOREACH_SAFE(curr_p, &head, next, temp_p)
 		{
 			if (curr_p->thread_complete_flag)
@@ -384,6 +384,7 @@ int main(int argc, char *argv[])
 		free(curr_p);
 	}
 
+	pthread_join(timer_thread_id,NULL);
 	status = close(sockfd);
 	if (status != 0)
 	{
