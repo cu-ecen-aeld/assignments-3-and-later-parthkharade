@@ -73,7 +73,7 @@ void timer_handler()
 	fflush(stdout);
 	pthread_mutex_lock(&aesdsock_mutex);
 	int log_fd = open(log_path, O_CREAT | O_APPEND | O_RDWR, S_IRWXU | S_IRGRP | S_IROTH);
-	write(log_fd, RFC2822BUF, timeStrLen+1);
+	write(log_fd, RFC2822BUF, timeStrLen);
 	pthread_mutex_unlock(&aesdsock_mutex);
 }
 int handle_new_connection(void *__thread_data)
