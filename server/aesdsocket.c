@@ -67,9 +67,10 @@ void timer_handler()
 {
 	time_t t = time(NULL);
 	struct tm *curr_time = localtime(&t);
-	char RFC2822BUF[40];
+	char RFC2822BUF[50]={0};
 	strftime(RFC2822BUF, sizeof(RFC2822BUF), "timestamp:%a, %d %b %Y %T %Z\n", curr_time);
 	int timeStrLen = strlen(RFC2822BUF);
+	fflush(stdout);
 	pthread_mutex_lock(&aesdsock_mutex);
 	int log_fd = open(log_path, O_CREAT | O_APPEND | O_RDWR, S_IRWXU | S_IRGRP | S_IROTH);
 	write(log_fd, RFC2822BUF, timeStrLen+1);
@@ -402,5 +403,3 @@ int main(int argc, char *argv[])
 	}
 	exit(exit_status);
 }
-
-// "timestamp : %a, %d %b %Y %T %Z"
