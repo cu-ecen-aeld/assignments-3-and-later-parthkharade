@@ -11,36 +11,49 @@
  *
  */
 
+#include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/printk.h>
 #include <linux/types.h>
 #include <linux/cdev.h>
 #include <linux/fs.h> // file_operations
+#include <linux/slab.h>
 #include "aesdchar.h"
+#include <linux/errno.h>
+#include <linux/gfp.h>
+#include <linux/string.h>
+#include <linux/uaccess.h>
 int aesd_major =   0; // use dynamic major
 int aesd_minor =   0;
 
-MODULE_AUTHOR("Your Name Here"); /** TODO: fill in your name **/
+MODULE_AUTHOR("Parth Kharade"); /** TODO: fill in your name **/
 MODULE_LICENSE("Dual BSD/GPL");
 
 struct aesd_dev aesd_device;
 
+/** Reference Linux Device Drivers Chapter 3 - Scull Open*/
 int aesd_open(struct inode *inode, struct file *filp)
 {
+    struct aesd_dev *aesd_device;
+
+
     PDEBUG("open");
     /**
      * TODO: handle open
      */
+    aesd_device = container_of(inode->i_cdev,struct aesd_dev,cdev);
+    filp->private_data = aesd_device;
     return 0;
 }
-
+/** Reference Linux Device Drivers Chapter 3 - Scull release*/
 int aesd_release(struct inode *inode, struct file *filp)
 {
     PDEBUG("release");
     /**
      * TODO: handle release
      */
+    filp->private_data = NULL;
     return 0;
 }
 
@@ -48,21 +61,110 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
                 loff_t *f_pos)
 {
     ssize_t retval = 0;
+    struct aesd_buffer_entry *ret_buf = NULL;
+    struct aesd_dev *dev = filp->private_data;
+    size_t byte_offset = 0;
+    size_t bytes_avail = 0;
+    size_t read_bytes = 0;
+    int bytes_rem = 0;
     PDEBUG("read %zu bytes with offset %lld",count,*f_pos);
     /**
      * TODO: handle read
      */
+
+
+    retval = mutex_lock_interruptible(&dev->lock);
+    if(retval!=0){
+        PDEBUG("Failed to acquire mutex");
+        retval = -ERESTART;
+        goto exit;
+    }
+    
+    ret_buf = aesd_circular_buffer_find_entry_offset_for_fpos(&dev->dev_buff,*f_pos,&byte_offset);
+    if(ret_buf == NULL){
+        retval = 0;
+        PDEBUG("Not enough bytes to read.");
+        goto free_mutex;
+    }
+
+    bytes_avail = ret_buf->size - byte_offset;
+    read_bytes = (bytes_avail>count)?count:bytes_avail;
+
+    bytes_rem = copy_to_user(buf,(ret_buf->buffptr + byte_offset),read_bytes);
+    if(bytes_rem!=0){
+        retval = -EFAULT;
+        PDEBUG("copy to user failed. Bytes remaining %d",bytes_rem);
+        goto free_mutex;
+    }
+    retval = read_bytes;
+    free_mutex:
+    mutex_unlock(&dev->lock);
+    exit:
     return retval;
 }
 
 ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
                 loff_t *f_pos)
 {
-    ssize_t retval = -ENOMEM;
-    PDEBUG("write %zu bytes with offset %lld",count,*f_pos);
+    ssize_t retval = 0;
+    struct aesd_dev *dev = filp->private_data;
+    void *temp_ptr;
+    char *offset_ptr; 
+    if(count == 0){
+        retval = count;
+        goto exit; // If we try to realloc with 0 the pointer will be freed?
+    }
+
+
+    if(dev == NULL){
+        PDEBUG("Device not initialised");
+        retval = -ENODEV;
+        goto exit;
+    }
+    retval = mutex_lock_interruptible(&dev->lock);
+    if(retval != 0){
+        retval = -ERESTART;
+        goto exit;
+    }
+    
     /**
-     * TODO: handle write
-     */
+     * realloc returns null if it fails. If we directly overwrite our previous pointer, we'll have a memory leak in case realloc fails.
+     * The previous pointer is still valid and can be freed if required.
+    */
+    temp_ptr = krealloc(dev->temp.buffptr,(dev->temp.size + count), GFP_KERNEL); 
+    if(temp_ptr == NULL){
+        PDEBUG("Realloc failed during write.");
+        kfree(dev->temp.buffptr);
+        retval = -ENOMEM;
+        goto free_mutex;
+    }
+    dev->temp.buffptr = (char *)temp_ptr;
+    
+    // Copy data into temp buff.
+    offset_ptr = (dev->temp.buffptr+dev->temp.size);
+    retval = copy_from_user(offset_ptr,buf,count);
+    if(retval != 0){
+        PDEBUG("Failed to copy to kernel buffer");
+        kfree(dev->temp.buffptr);
+        goto free_mutex;
+    }
+    dev->temp.size+=count;
+    
+    // If a new line was received add to circular buffer
+    if(memchr(buf,'\n',count)){
+        struct aesd_buffer_entry *ret_ptr= aesd_circular_buffer_add_entry(&dev->dev_buff,&dev->temp);
+        if(ret_ptr!=NULL){
+            kfree(ret_ptr);
+        }
+        dev->temp.buffptr = NULL; // krealloc should malloc a new pointer next time.
+        dev->temp.size = 0;
+    }
+
+    PDEBUG("write %zu bytes with offset %lld",count,*f_pos);
+
+    free_mutex:
+    mutex_unlock(&dev->lock);
+    exit:
     return retval;
 }
 struct file_operations aesd_fops = {
@@ -105,6 +207,8 @@ int aesd_init_module(void)
     /**
      * TODO: initialize the AESD specific portion of the device
      */
+    aesd_circular_buffer_init(&aesd_device.dev_buff);
+    mutex_init(&aesd_device.lock); // Initialize the mutex for the circular buffer.
 
     result = aesd_setup_cdev(&aesd_device);
 
@@ -118,17 +222,21 @@ int aesd_init_module(void)
 void aesd_cleanup_module(void)
 {
     dev_t devno = MKDEV(aesd_major, aesd_minor);
-
+    struct aesd_buffer_entry *curr;
+    int i=0;
     cdev_del(&aesd_device.cdev);
 
     /**
      * TODO: cleanup AESD specific poritions here as necessary
      */
-
+    
+    
+    AESD_CIRCULAR_BUFFER_FOREACH(curr,&aesd_device.dev_buff,i){
+        if(curr->buffptr != NULL){
+            kfree(curr->buffptr);
+        }
+    }
     unregister_chrdev_region(devno, 1);
 }
-
-
-
 module_init(aesd_init_module);
 module_exit(aesd_cleanup_module);
