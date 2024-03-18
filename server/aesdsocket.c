@@ -23,8 +23,13 @@ bool accept_connection = true;
 extern int errno;
 #define BACKLOG 20
 #define BUFF_SIZE 1024
-const char *log_path = "/var/tmp/aesdsocketdata";
+#define USE_AESD_CHAR_DEVICE 1
 
+#if USE_AESD_CHAR_DEVICE
+const char *log_path = "/dev/aesdchar";
+#else
+const char *log_path = "/var/tmp/aesdsocketdata";
+#endif
 int caught_signal;
 int sockfd;
 bool signal_rec = false;
@@ -38,7 +43,11 @@ struct thread_data_s
 	SLIST_ENTRY(thread_data_s)
 	next;
 };
+
+#if !(USE_AESD_CHAR_DEVICE)
 pthread_mutex_t aesdsock_mutex;
+#endif
+
 void signal_handler(int sig_num)
 {
 	signal_rec = true;
@@ -67,6 +76,7 @@ void timer_handler()
 {
 	timer_expired = true;
 }
+
 int handle_new_connection(void *__thread_data)
 {
 	/**
@@ -88,7 +98,11 @@ int handle_new_connection(void *__thread_data)
 	/**
 	 * Open both the temp file and the log file
 	 */
-	int log_fd = open(log_path, O_CREAT | O_APPEND | O_RDWR, S_IRWXU | S_IRGRP | S_IROTH);
+	#if USE_AESD_CHAR_DEVICE
+		int log_fd = open(log_path, O_APPEND | O_WRONLY);
+	#else
+		int log_fd = open(log_path, O_CREAT | O_APPEND | O_RDWR, S_IRWXU | S_IRGRP | S_IROTH);
+	#endif
 	int tmp_fd = open(tmpfile_path, O_CREAT | O_RDWR, S_IRWXU | S_IRGRP | S_IROTH);
 
 	int num_read_bytes = 0;
@@ -138,6 +152,7 @@ int handle_new_connection(void *__thread_data)
 				char *tmp_buff = (char *)malloc(sizeof(char) * packet_len);
 				lseek(tmp_fd, 0, SEEK_SET); // Reset the cursor to the origin before reading.
 				read(tmp_fd, tmp_buff, packet_len);
+				#if !(USE_AESD_CHAR_DEVICE)
 				int lock_status = pthread_mutex_lock(&aesdsock_mutex);
 				if (lock_status != 0)
 				{
@@ -147,6 +162,7 @@ int handle_new_connection(void *__thread_data)
 					break;
 				}
 				else
+				#endif
 				{
 					num_write_bytes = write(log_fd, tmp_buff, packet_len);
 					if (num_write_bytes != packet_len)
@@ -154,6 +170,7 @@ int handle_new_connection(void *__thread_data)
 						syslog(LOG_ERR, "write() to aesdsock failed error : %s\n", strerror(errno));
 						ret_code = -1;
 					}
+					#if !(USE_AESD_CHAR_DEVICE)
 					if (pthread_mutex_unlock(&aesdsock_mutex) != 0)
 					{
 						syslog(LOG_ERR, "Failed to unlock mutex.");
@@ -161,7 +178,9 @@ int handle_new_connection(void *__thread_data)
 						ret_code = -1;
 						break;
 					}
+					#endif
 					free(tmp_buff);
+					close(log_fd);
 					remove(tmpfile_path);
 				}
 			}
@@ -169,11 +188,15 @@ int handle_new_connection(void *__thread_data)
 		if (ret_code == 0)
 		{
 			packet_complete = false;
-			lseek(log_fd, 0, SEEK_SET); // Reset the cursor to the origin before reading.
+			#if USE_AESD_CHAR_DEVICE
+				int log_fd = open(log_path, O_RDONLY);
+			#else
+				int log_fd = open(log_path, O_CREAT | O_RDWR, S_IRWXU | S_IRGRP | S_IROTH);
+			#endif
 			while (!packet_complete)
 			{
 				num_read_bytes = read(log_fd, rec_buff, BUFF_SIZE);
-				if (num_read_bytes < BUFF_SIZE)
+				if (num_read_bytes == 0)
 				{
 					packet_complete = true;
 				}
@@ -219,7 +242,9 @@ int main(int argc, char *argv[])
 	signal(SIGTERM, signal_handler);
 	signal(SIGINT, signal_handler);
 	signal(SIGALRM, timer_handler);
+	#if !(USE_AESD_CHAR_DEVICE)
 	pthread_mutex_init(&aesdsock_mutex, NULL);
+	#endif
 	SLIST_HEAD(threadListHead, thread_data_s)
 	head;
 	SLIST_INIT(&head);
@@ -294,7 +319,9 @@ int main(int argc, char *argv[])
 			}
 		}
 	}
+	#if !(USE_AESD_CHAR_DEVICE)
 	init_timer();
+	#endif
 	status = listen(sockfd, BACKLOG);
 	if (status != 0)
 	{
@@ -334,6 +361,7 @@ int main(int argc, char *argv[])
 			thread_data->id = thread_id;
 			SLIST_INSERT_HEAD(&head, thread_data, next);
 		}
+		#if !(USE_AESD_CHAR_DEVICE)
 		if (timer_expired)
 		{
 			time_t t = time(NULL);
@@ -348,6 +376,7 @@ int main(int argc, char *argv[])
 			close(log_fd);
 			timer_expired = false;
 		}
+		#endif
 		SLIST_FOREACH_SAFE(curr_p, &head, next, temp_p)
 		{
 			if (curr_p->thread_complete_flag)
@@ -382,7 +411,9 @@ int main(int argc, char *argv[])
 		exit_status = EXIT_FAILURE;
 	}
 	closelog();
+	#if !(USE_AESD_CHAR_DEVICE)
 	remove(log_path);
+	#endif
 	if (signal_rec)
 	{
 		syslog(LOG_USER, "Closing Signal : %s\n", strsignal(caught_signal));
