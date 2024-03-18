@@ -97,6 +97,7 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
         goto free_mutex;
     }
     retval = read_bytes;
+    *f_pos+=read_bytes;
     free_mutex:
     mutex_unlock(&dev->lock);
     exit:
@@ -106,52 +107,62 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
 ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
                 loff_t *f_pos)
 {
+    PDEBUG("Write");
     ssize_t retval = 0;
     struct aesd_dev *dev = filp->private_data;
-    void *temp_ptr;
+    void *temp_realloc_ptr;
     char *offset_ptr; 
+    char *temp_buff = (char *)kmalloc(count,GFP_KERNEL);
     if(count == 0){
         retval = count;
         goto exit; // If we try to realloc with 0 the pointer will be freed?
     }
-
 
     if(dev == NULL){
         PDEBUG("Device not initialised");
         retval = -ENODEV;
         goto exit;
     }
+
+    retval = copy_from_user(temp_buff,buf,count);
+    if(retval != 0){
+        PDEBUG("Failed to copy to kernel buffer");
+        goto exit;
+    } 
+    PDEBUG("Copied into temp buff");
+
+    /**
+     * Search for a new line and decide how many bytes to copy.
+    */
+    const char *newline_ptr = memchr(temp_buff,'\n',count);
+    size_t bytes_to_copy = count;
+    if(newline_ptr !=NULL){
+        bytes_to_copy = newline_ptr-temp_buff + 1;
+    }
+    PDEBUG("Bytes to copy %d",bytes_to_copy);
+    /**
+     * realloc returns null if it fails. If we directly overwrite our previous pointer, we'll have a memory leak in case realloc fails.
+     * The previous pointer is still valid and can be freed if required.
+    */
     retval = mutex_lock_interruptible(&dev->lock);
     if(retval != 0){
         retval = -ERESTART;
         goto exit;
     }
-    
-    /**
-     * realloc returns null if it fails. If we directly overwrite our previous pointer, we'll have a memory leak in case realloc fails.
-     * The previous pointer is still valid and can be freed if required.
-    */
-    temp_ptr = krealloc(dev->temp.buffptr,(dev->temp.size + count), GFP_KERNEL); 
-    if(temp_ptr == NULL){
+    temp_realloc_ptr = krealloc(dev->temp.buffptr,(dev->temp.size + bytes_to_copy), GFP_KERNEL); 
+    if(temp_realloc_ptr == NULL){
         PDEBUG("Realloc failed during write.");
         kfree(dev->temp.buffptr);
         retval = -ENOMEM;
         goto free_mutex;
     }
-    dev->temp.buffptr = (char *)temp_ptr;
-    
-    // Copy data into temp buff.
+    dev->temp.buffptr = (char *)temp_realloc_ptr;
     offset_ptr = (dev->temp.buffptr+dev->temp.size);
-    retval = copy_from_user(offset_ptr,buf,count);
-    if(retval != 0){
-        PDEBUG("Failed to copy to kernel buffer");
-        kfree(dev->temp.buffptr);
-        goto free_mutex;
-    }
-    dev->temp.size+=count;
-    
-    // If a new line was received add to circular buffer
-    if(memchr(buf,'\n',count)){
+    memcpy(offset_ptr,temp_buff,bytes_to_copy);
+    dev->temp.size+=bytes_to_copy;
+    PDEBUG("Copied bytes to temp structure");
+    retval = bytes_to_copy;
+    if(newline_ptr != NULL){
         struct aesd_buffer_entry *ret_ptr= aesd_circular_buffer_add_entry(&dev->dev_buff,&dev->temp);
         if(ret_ptr!=NULL){
             kfree(ret_ptr);
@@ -159,12 +170,12 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
         dev->temp.buffptr = NULL; // krealloc should malloc a new pointer next time.
         dev->temp.size = 0;
     }
-
     PDEBUG("write %zu bytes with offset %lld",count,*f_pos);
 
     free_mutex:
     mutex_unlock(&dev->lock);
     exit:
+    kfree(temp_buff);
     return retval;
 }
 struct file_operations aesd_fops = {
