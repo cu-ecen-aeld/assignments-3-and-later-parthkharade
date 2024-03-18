@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 # Global variables to retain value between recursive calls.
 filecount=0
 matchcount=0
@@ -13,10 +13,10 @@ search(){
 			search $file
 		elif [ -r $file ]
 		then
-			((filecount+=1))
-			((matchcount+=$(cat ${file}|grep "$searchstr"|wc -l)))
+			filecount=$((filecount+1))
+			matchcount=$((matchcount+$(cat ${file}|grep "$searchstr"|wc -l)))
 		else
-			((filecount+=1))
+			filecount=$((filecount+1))
 		fi
 	done
 }
