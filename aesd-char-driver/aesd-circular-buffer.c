@@ -13,9 +13,7 @@
 #else
 #include <string.h>
 #endif
-#include <stdio.h>
 #include "aesd-circular-buffer.h"
-
 /**
  * @param buffer the buffer to search for corresponding offset.  Any necessary locking must be performed by caller.
  * @param char_offset the position to search for in the buffer list, describing the zero referenced
@@ -63,7 +61,6 @@ struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(struct
     }
     if(found_offset == true){
         search_index--;
-        printf("Search Index %u\r\n",search_index);
         search_offset-=buffer->entry[search_index].size;
         *entry_offset_byte_rtn = char_offset-search_offset;
         retPtr = &buffer->entry[search_index];
@@ -78,24 +75,25 @@ struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(struct
  * Any necessary locking must be handled by the caller
  * Any memory referenced in @param add_entry must be allocated by and/or must have a lifetime managed by the caller.
  */
-void aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const struct aesd_buffer_entry *add_entry)
+struct aesd_buffer_entry *aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const struct aesd_buffer_entry *add_entry)
 {
     /**
      * TODO: implement per description
      */
-
+    struct aesd_buffer_entry *retval = NULL;
     if (buffer == NULL || add_entry == NULL)
     {
-        return;
+        return retval;
     }
-
     buffer->entry[buffer->in_offs].buffptr = add_entry->buffptr;
     buffer->entry[buffer->in_offs].size = add_entry->size;
     buffer->in_offs++;
     buffer->in_offs%=AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
     if (buffer->full)
     {
+        retval = &buffer->entry[buffer->out_offs];
         buffer->out_offs++;
+        buffer->out_offs%=AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
     }
     else
     {
@@ -104,6 +102,7 @@ void aesd_circular_buffer_add_entry(struct aesd_circular_buffer *buffer, const s
             buffer->full = true;
         }
     }
+    return retval;
 }
 
 /**
