@@ -180,16 +180,17 @@ int handle_new_connection(void *__thread_data)
 					}
 					#endif
 					free(tmp_buff);
-					close(log_fd);
+					/* close(log_fd); */
 					remove(tmpfile_path);
 				}
 			}
 		}
+    lseek(log_fd,0,SEEK_SET);
 		if (ret_code == 0)
 		{
 			packet_complete = false;
 			#if USE_AESD_CHAR_DEVICE
-				int log_fd = open(log_path, O_RDONLY);
+				/* int log_fd = open(log_path, O_RDONLY); */
 			#else
 				int log_fd = open(log_path, O_CREAT | O_RDWR, S_IRWXU | S_IRGRP | S_IROTH);
 			#endif
