@@ -106,54 +106,56 @@ exit:
 
 loff_t aesd_llseek(struct file *filp, loff_t off, int whence){
   PDEBUG("File Position = %lld",filp->f_pos);
-  filp->f_pos = off;
-  return off;
-//  struct aesd_dev *dev = filp->private_data;
-//  loff_t new_f_pos = 0;
-//  int size = 0;
-//  int retval;
-//  int i = dev->dev_buff.out_offs;
-//  PDEBUG("Entered LLSEEK\r\n");
-//  switch(whence){
-//    case 0:/*SEEK SET*/
-//      new_f_pos = off;
-//      PDEBUG("SEEK SET with offset as %d\r\n",off);
-//      PDEBUG("Value of new_f_pos is %d\r\n",new_f_pos);
-//      break;
-//    case 1:/*SEEK CURR*/
-//      new_f_pos = filp->f_pos + off;
-//      break;
-//    case 2:/*SEEK END*/
-//      retval = mutex_lock_interruptible(&dev->lock);
-//      if(retval != 0){
-//        retval = -ERESTART;
-//        goto exit;
-//      }
-//      while(1){
-//        if(i == dev->dev_buff.in_offs){
-//          break;
-//        }
-//        size+=dev->dev_buff.entry[i].size;
-//        i++;
-//        i%=(AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED);
-//      }
-//      mutex_unlock(&dev->lock);
-//      new_f_pos = size - 1 + off;
-//      break;
-//    default:
-//      retval = -EINVAL;
-//      goto exit;
-//      break;
-//  }
-//  if(new_f_pos<0){
-//    retval = -EINVAL;
-//    goto exit;
-//  }
-//  retval = new_f_pos;
-//  filp->f_pos = new_f_pos;
-//  PDEBUG("Value of new pos  is %d\r\n",filp->f_pos);
-//exit:
-//  return retval;
+ struct aesd_dev *dev = filp->private_data;
+ loff_t new_f_pos = 0;
+ int size = 0;
+ int retval;
+ int i = dev->dev_buff.out_offs;
+ PDEBUG("Entered LLSEEK\r\n");
+ switch(whence){
+   case 0:/*SEEK SET*/
+     new_f_pos = off;
+     PDEBUG("SEEK SET with offset as %d\r\n",off);
+     PDEBUG("Value of new_f_pos is %d\r\n",new_f_pos);
+     break;
+   case 1:/*SEEK CURR*/
+     new_f_pos = filp->f_pos + off;
+     PDEBUG("SEEK CURR with offset as %d\r\n",off);
+     PDEBUG("Value of new_f_pos is %d\r\n",new_f_pos);
+     break;
+   case 2:/*SEEK END*/
+     retval = mutex_lock_interruptible(&dev->lock);
+     if(retval != 0){
+       retval = -ERESTART;
+       goto exit;
+     }
+     while(1){
+       if(i == dev->dev_buff.in_offs){
+         break;
+       }
+       size+=dev->dev_buff.entry[i].size;
+       i++;
+       i%=(AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED);
+     }
+     mutex_unlock(&dev->lock);
+     new_f_pos = size - 1 + off;
+     PDEBUG("SEEK END with offset as %d\r\n",off);
+     PDEBUG("Value of new_f_pos is %d\r\n",new_f_pos);
+     break;
+   default:
+     retval = -EINVAL;
+     goto exit;
+     break;
+ }
+ if(new_f_pos<0){
+   retval = -EINVAL;
+   goto exit;
+ }
+ retval = new_f_pos;
+ filp->f_pos = new_f_pos;
+ PDEBUG("Value of new pos  is %d\r\n",filp->f_pos);
+exit:
+ return retval;
 }
 ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
     loff_t *f_pos)
@@ -218,6 +220,7 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
     if(ret_ptr!=NULL){
       kfree(ret_ptr);
     }
+    filp->f_pos+
     dev->temp.buffptr = NULL; // krealloc should malloc a new pointer next time.
     dev->temp.size = 0;
   }
