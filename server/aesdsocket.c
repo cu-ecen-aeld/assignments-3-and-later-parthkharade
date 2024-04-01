@@ -99,7 +99,7 @@ int handle_new_connection(void *__thread_data)
 	 * Open both the temp file and the log file
 	 */
 	#if USE_AESD_CHAR_DEVICE
-		int log_fd = open(log_path, O_APPEND | O_WRONLY);
+		int log_fd = open(log_path, O_APPEND | O_RDWR);
 	#else
 		int log_fd = open(log_path, O_CREAT | O_APPEND | O_RDWR, S_IRWXU | S_IRGRP | S_IROTH);
 	#endif
