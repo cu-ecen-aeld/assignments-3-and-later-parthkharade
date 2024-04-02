@@ -115,7 +115,6 @@ int handle_new_connection(void *__thread_data)
 	int ret_code = 0;
 	if (log_fd == -1 || tmp_fd == -1)
 	{
-		printf("Failed to open a file \r\n");
 		syslog(LOG_ERR, "open() error for log/temp file : %s\n", strerror(errno));
 		ret_code = -1;
 	}
@@ -142,9 +141,6 @@ int handle_new_connection(void *__thread_data)
           seekto.write_cmd = atoi(strtok(rec_buff+command_len,","));
           seekto.write_cmd_offset = atoi(strtok(NULL,","));
           syslog(LOG_INFO,"Received IOCTL command\n");
-          printf("Received IOCTL command\r\n");
-          printf("Received IOCTL command write_cmd is %d\r\n",seekto.write_cmd);
-          printf("Received IOCTL command write_cmd_offset is %d\r\n",seekto.write_cmd_offset);
           int ioctl_cmd = ioctl(log_fd,AESDCHAR_IOCSEEKTO,&seekto);
           if(ioctl_cmd < 0)
           {
@@ -179,7 +175,6 @@ int handle_new_connection(void *__thread_data)
 				{
 					syslog(LOG_ERR, "pthread_mutex_lock() failed. error");
 					ret_code = -1;
-					printf("Failed to acquire mutex\r\n");
 					break;
 				}
 				else
@@ -195,7 +190,6 @@ int handle_new_connection(void *__thread_data)
 					if (pthread_mutex_unlock(&aesdsock_mutex) != 0)
 					{
 						syslog(LOG_ERR, "Failed to unlock mutex.");
-						printf("Failed to unlock mutex\r\n");
 						ret_code = -1;
 						break;
 					}
