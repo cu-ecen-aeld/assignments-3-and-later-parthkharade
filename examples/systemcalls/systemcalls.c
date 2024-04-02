@@ -1,4 +1,8 @@
 #include "systemcalls.h"
+#include <sys/wait.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <fcntl.h>
 
 /**
  * @param cmd the command to execute with system()
@@ -16,8 +20,13 @@ bool do_system(const char *cmd)
  *   and return a boolean true if the system() call completed with success
  *   or false() if it returned a failure
 */
-
-    return true;
+	int status = system(cmd);
+	if(WIFEXITED(status)){
+	 	return true;
+	}
+	else{
+		return false;
+	}
 }
 
 /**
@@ -45,10 +54,32 @@ bool do_exec(int count, ...)
         command[i] = va_arg(args, char *);
     }
     command[count] = NULL;
-    // this line is to avoid a compile warning before your implementation is complete
-    // and may be removed
-    command[count] = command[count];
 
+    pid_t pid = fork();
+    if(pid == -1)
+	    return false;
+    else if(pid == 0){
+    	// This means that this is the child.
+	// Call execv.
+	execv(command[0],(command));
+	exit(EXIT_FAILURE); // if execv returns then an error occured	
+    }
+    else{
+	va_end(args);
+   	 int status;
+   	 if(waitpid(pid,&status,0)==-1){
+		 printf("EXITED HERE\n");
+   	 	return false;
+   	 }
+   	 else if(WIFEXITED(status)){
+		 if(WEXITSTATUS(status))
+   	     		return false;
+		 else
+			 return true;
+   	 }
+	 else
+		 return false;
+    }
 /*
  * TODO:
  *   Execute a system command by calling fork, execv(),
@@ -59,9 +90,7 @@ bool do_exec(int count, ...)
  *
 */
 
-    va_end(args);
 
-    return true;
 }
 
 /**
@@ -71,20 +100,16 @@ bool do_exec(int count, ...)
 */
 bool do_exec_redirect(const char *outputfile, int count, ...)
 {
-    va_list args;
-    va_start(args, count);
-    char * command[count+1];
-    int i;
-    for(i=0; i<count; i++)
-    {
-        command[i] = va_arg(args, char *);
-    }
-    command[count] = NULL;
-    // this line is to avoid a compile warning before your implementation is complete
-    // and may be removed
-    command[count] = command[count];
-
-
+   	 va_list args;
+   	 va_start(args, count);
+   	 char * command[count+1];
+   	 int i;
+   	 for(i=0; i<count; i++)
+   	 {
+   	     command[i] = va_arg(args, char *);
+   	 }
+   	 command[count] = NULL;
+   	 
 /*
  * TODO
  *   Call execv, but first using https://stackoverflow.com/a/13784315/1446624 as a refernce,
@@ -92,8 +117,43 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
  *   The rest of the behaviour is same as do_exec()
  *
 */
+   	 int fd = open(outputfile,O_TRUNC|O_CREAT|O_WRONLY,0644);
+   	 if(fd<0){
+   	     	perror("Failed to open file");
+		return false;
+   	 }
+   	if(dup2(fd,1) == -1){
+    		perror("Redirection failed");   	     	
+		return false;
+   	}
 
-    va_end(args);
 
-    return true;
+   	 pid_t pid = fork();
+   	 if(pid == -1){
+   	         perror("Failed to fork");
+   	         return false;
+	 }
+   	 else if(pid == 0){
+   		// This means that this is the child.
+   	     	// Call execv.
+   	     	execv(command[0],(command));
+   	     	exit(1); // if execv returns then an error occured	
+   	 }
+   	 else{
+   	    	 va_end(args);
+		 close(fd);
+   		 int status;
+   		 if(waitpid(pid,&status,0)==-1){
+   		 	return false;
+   		 }
+   		 else if(WIFEXITED(status)){
+   	     	 if(WEXITSTATUS(status))
+   		     	 return false;
+   	     	 else
+   	     		 return true;
+   		 }
+   	      	 else
+   	     	 	 return false;
+   	 }
 }
+
