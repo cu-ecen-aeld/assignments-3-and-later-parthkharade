@@ -19,6 +19,8 @@
 #include <signal.h>
 #include <stdlib.h>
 #include <pthread.h>
+#include <sys/ioctl.h>
+#include "../aesd-char-driver/aesd_ioctl.h"
 bool accept_connection = true;
 extern int errno;
 #define BACKLOG 20
@@ -26,6 +28,8 @@ extern int errno;
 #define USE_AESD_CHAR_DEVICE 1
 
 #if USE_AESD_CHAR_DEVICE
+const char *aesd_ioctl_cmd = "AESDCHAR_IOCSEEKTO:";
+const int command_len = 19;
 const char *log_path = "/dev/aesdchar";
 #else
 const char *log_path = "/var/tmp/aesdsocketdata";
@@ -99,7 +103,7 @@ int handle_new_connection(void *__thread_data)
 	 * Open both the temp file and the log file
 	 */
 	#if USE_AESD_CHAR_DEVICE
-		int log_fd = open(log_path, O_APPEND | O_WRONLY);
+		int log_fd = open(log_path, O_APPEND | O_RDWR);
 	#else
 		int log_fd = open(log_path, O_CREAT | O_APPEND | O_RDWR, S_IRWXU | S_IRGRP | S_IROTH);
 	#endif
@@ -111,7 +115,6 @@ int handle_new_connection(void *__thread_data)
 	int ret_code = 0;
 	if (log_fd == -1 || tmp_fd == -1)
 	{
-		printf("Failed to open a file \r\n");
 		syslog(LOG_ERR, "open() error for log/temp file : %s\n", strerror(errno));
 		ret_code = -1;
 	}
@@ -132,6 +135,20 @@ int handle_new_connection(void *__thread_data)
 			}
 			else
 			{
+        if(strncmp(rec_buff,aesd_ioctl_cmd,command_len) == 0)
+        {
+          struct aesd_seekto seekto;
+          seekto.write_cmd = atoi(strtok(rec_buff+command_len,","));
+          seekto.write_cmd_offset = atoi(strtok(NULL,","));
+          syslog(LOG_INFO,"Received IOCTL command\n");
+          int ioctl_cmd = ioctl(log_fd,AESDCHAR_IOCSEEKTO,&seekto);
+          if(ioctl_cmd < 0)
+          {
+            syslog(LOG_ERR,"IOCTL failed\n");
+            ret_code = -1;
+          }
+          goto read;
+        }
 				// Copy yhe buffer into a temp file.
 				packet_len += num_read_bytes;
 
@@ -158,7 +175,6 @@ int handle_new_connection(void *__thread_data)
 				{
 					syslog(LOG_ERR, "pthread_mutex_lock() failed. error");
 					ret_code = -1;
-					printf("Failed to acquire mutex\r\n");
 					break;
 				}
 				else
@@ -174,22 +190,23 @@ int handle_new_connection(void *__thread_data)
 					if (pthread_mutex_unlock(&aesdsock_mutex) != 0)
 					{
 						syslog(LOG_ERR, "Failed to unlock mutex.");
-						printf("Failed to unlock mutex\r\n");
 						ret_code = -1;
 						break;
 					}
 					#endif
 					free(tmp_buff);
-					close(log_fd);
+					/* close(log_fd); */
 					remove(tmpfile_path);
 				}
 			}
 		}
+    lseek(log_fd,0,SEEK_SET);
 		if (ret_code == 0)
 		{
+read:
 			packet_complete = false;
 			#if USE_AESD_CHAR_DEVICE
-				int log_fd = open(log_path, O_RDONLY);
+				/* int log_fd = open(log_path, O_RDONLY); */
 			#else
 				int log_fd = open(log_path, O_CREAT | O_RDWR, S_IRWXU | S_IRGRP | S_IROTH);
 			#endif
